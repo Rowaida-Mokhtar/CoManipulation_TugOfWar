@@ -1,10 +1,16 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 public class TugOfWarController : MonoBehaviour
 {
     [Header("Rope")]
     public Transform rope;
+
+    [Header("Balance Marker")]
+    public Transform balanceMarker;
+
+    [Header("Players")]
+    public Transform playerA;
+    public Transform playerB;
 
     [Header("Player Strength")]
     public float playerAStrength = 1f;
@@ -16,92 +22,106 @@ public class TugOfWarController : MonoBehaviour
 
     private float ropeOffset = 0f;
 
-    private float inputA = 0f;
-    private float inputB = 0f;
-    private float balance = 0f;
-
     void Update()
     {
-        // Player A pulls with the A key
-        inputA = Keyboard.current.aKey.isPressed
+        // -----------------------------
+        // 1. READ PLAYER INPUT
+        // -----------------------------
+
+        float inputA = Input.GetKey(KeyCode.A)
             ? playerAStrength
             : 0f;
 
-        // Player B pulls with the D key
-        inputB = Keyboard.current.dKey.isPressed
+        float inputB = Input.GetKey(KeyCode.D)
             ? playerBStrength
             : 0f;
 
-        // Calculate input balance
-        // Positive = Player A is pulling harder
-        // Negative = Player B is pulling harder
-        // Zero = balanced
-        balance = inputA - inputB;
 
-        // Move the shared rope according to the input balance
+        // -----------------------------
+        // 2. CALCULATE INPUT BALANCE
+        // -----------------------------
+
+        float balance = inputA - inputB;
+
+
+        // -----------------------------
+        // 3. UPDATE BALANCE
+        // -----------------------------
+
         ropeOffset += balance * ropeSpeed * Time.deltaTime;
 
-        // Prevent the rope from moving too far
         ropeOffset = Mathf.Clamp(
             ropeOffset,
             -maxRopeOffset,
             maxRopeOffset
         );
 
-        // Update the rope position
-        Vector3 position = rope.position;
 
-        // Players are separated along the Z axis
-        position.z = ropeOffset;
+        // -----------------------------
+        // 4. KEEP ROPE CONNECTED
+        // -----------------------------
 
-        rope.position = position;
-    }
-
-    void OnGUI()
-    {
-        // Main information panel
-        GUI.Box(
-            new Rect(20, 20, 300, 190),
-            "CO-MANIPULATION TUG OF WAR"
-        );
-
-        // Player A input
-        GUI.Label(
-            new Rect(40, 55, 250, 25),
-            "Player A - Hold A: " + inputA.ToString("F1")
-        );
-
-        // Player B input
-        GUI.Label(
-            new Rect(40, 80, 250, 25),
-            "Player B - Hold D: " + inputB.ToString("F1")
-        );
-
-        // Input balance
-        GUI.Label(
-            new Rect(40, 110, 250, 25),
-            "Input Balance: " + balance.ToString("F1")
-        );
-
-        // Status message
-        string status;
-
-        if (balance > 0)
+        if (playerA != null &&
+            playerB != null &&
+            rope != null)
         {
-            status = "<- PLAYER A PULLING";
-        }
-        else if (balance < 0)
-        {
-            status = "PLAYER B PULLING ->";
-        }
-        else
-        {
-            status = "CENTER / BALANCED";
+            Vector3 positionA = playerA.position;
+            Vector3 positionB = playerB.position;
+
+            Vector3 direction =
+                (positionB - positionA).normalized;
+
+            float distance =
+                Vector3.Distance(positionA, positionB);
+
+            // Put the rope exactly halfway
+            // between the two players.
+            Vector3 ropeCenter =
+                (positionA + positionB) / 2f;
+
+            rope.position = ropeCenter;
+
+            // Rotate cylinder so its length
+            // points from A toward B.
+            rope.rotation =
+                Quaternion.FromToRotation(
+                    Vector3.up,
+                    direction
+                );
+
+            // Keep the rope exactly between
+            // the two players.
+            Vector3 scale = rope.localScale;
+            scale.y = distance / 2f;
+            rope.localScale = scale;
         }
 
-        GUI.Label(
-            new Rect(40, 145, 250, 25),
-            status
-        );
+
+        // -----------------------------
+        // 5. MOVE BALANCE MARKER
+        // -----------------------------
+
+        if (balanceMarker != null &&
+            playerA != null &&
+            playerB != null)
+        {
+            Vector3 positionA = playerA.position;
+            Vector3 positionB = playerB.position;
+
+            Vector3 direction =
+                (positionB - positionA).normalized;
+
+            Vector3 center =
+                (positionA + positionB) / 2f;
+
+            // The marker moves according
+            // to the input balance.
+            center += direction * ropeOffset;
+
+            // Keep marker at its existing height.
+            center.y = balanceMarker.position.y;
+
+            balanceMarker.position = center;
+        }
     }
 }
