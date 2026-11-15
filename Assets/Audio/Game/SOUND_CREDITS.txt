@@ -1,0 +1,10 @@
+Sound credits (for the thesis appendix)
+
+Grunts/grunt_01-07.wav  - "EFFORT SOUNDS (Male) - Audio Pack" by VoiceBosch, OpenGameArt.org, CC BY-SA 4.0.
+                          Files 01, 02, 03, 09, 12, 25, 28 (renamed). Attribution required: VoiceBosch.
+                          https://opengameart.org/content/effort-sounds-male-audio-pack
+Voice/count_*, go, you_win, you_lose, look_out_*, hurry_up - "Voiceover Pack" by Kenney (kenney.nl), CC0.
+Voice/winner, loser     - "Voiceover Pack: Fighter" by Kenney (kenney.nl), CC0.
+Splash/*                - Mixkit (mixkit.co): "Jump into the water" (1180), "Funny cartoon splash" (2884), Mixkit Sound Effects Free License.
+Rope/rope_creak_loop.ogg - "Rope" (ID 3417), BigSoundBank.com, CC0. 5-second excerpt (93-98 s), mono, normalised, faded.
+Ambience/garden_birds.ogg - "Ambient Bird Sounds" by isaiah658, OpenGameArt.org, CC0.
