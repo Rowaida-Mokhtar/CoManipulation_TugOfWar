@@ -1,0 +1,660 @@
+
+using UnityEngine;
+using TMPro;
+using UnityEngine.XR;
+
+public class TugOfWarController : MonoBehaviour
+{
+    [Header("Rope")]
+    public Transform rope;
+    public float ropeHeightOffset = -0.2f;
+
+    [Header("Players")]
+    public Transform playerA;
+    public Transform playerB;
+
+    [Header("Losing Lines")]
+    public Transform losingLineA;
+    public Transform losingLineB;
+
+    [Header("VR Controllers")]
+    public Transform controllerA;
+    public Transform controllerB;
+
+    [Header("Player Strength")]
+    [Min(0f)] public float playerAStrength = 1f;
+    [Min(0f)] public float playerBStrength = 1f;
+
+    [Header("Tug-of-War Mechanics")]
+    [Min(0f)] public float pullAcceleration = 1.5f;
+    [Min(0f)] public float ropeResistance = 2f;
+    [Min(0.01f)] public float maxRopeSpeed = 1.2f;
+    [Min(0.1f)] public float maxRopeOffset = 2.5f;
+
+    [Header("VR Pull Settings")]
+    [Min(0f)] public float pullSensitivity = 2f;
+    [Min(0f)] public float deadZone = 0.01f;
+
+    [Header("Keyboard Testing")]
+    public bool keyboardTesting = false;
+
+    [Header("VR Testing")]
+    public bool startGameOnAwake = false;
+
+    [Header("Name Entry")]
+    public TMP_InputField player1NameInput;
+    public TMP_InputField player2NameInput;
+    public GameObject player1NameObject;
+    public GameObject player2NameObject;
+    public GameObject startGameButtonObject;
+
+    [Header("Game Result")]
+    public TMP_Text losingMessage;
+    public GameObject playAgainButtonObject;
+
+    [Header("Pond Loss Zone")]
+    public BoxCollider pondLossZone;
+
+    [Header("Pond Splash")]
+    public AudioClip splashSound;
+    public float splashLifetime = 2f;
+
+    private float ropeVelocity;
+
+    private Vector3 previousControllerAPosition;
+    private Vector3 previousControllerBPosition;
+
+    private Vector3 startingRopePosition;
+    private Vector3 startingRopeScale;
+    private Quaternion startingRopeRotation;
+
+    private Vector3 startingPlayerAPosition;
+    private Vector3 startingPlayerBPosition;
+
+    private Vector3 pullAxis;
+
+    private bool controllersInitialized;
+    private bool gameStarted;
+    private bool gameOver;
+    private bool startingStateSaved;
+
+    private string playerAName = "Player A";
+    private string playerBName = "Player B";
+
+    private void Start()
+    {
+        SaveStartingState();
+        InitializeControllerPositions();
+
+        gameStarted = startGameOnAwake;
+        gameOver = false;
+
+        if (startGameOnAwake)
+        {
+            if (player1NameObject != null)
+                player1NameObject.SetActive(false);
+
+            if (player2NameObject != null)
+                player2NameObject.SetActive(false);
+
+            if (startGameButtonObject != null)
+                startGameButtonObject.SetActive(false);
+
+            Debug.Log("Tug-of-war auto-started for VR testing.");
+        }
+
+        if (losingMessage != null)
+        {
+            losingMessage.text = "";
+            losingMessage.gameObject.SetActive(false);
+        }
+
+        if (playAgainButtonObject != null)
+            playAgainButtonObject.SetActive(false);
+
+        UpdatePullAxis();
+        UpdateRopeVisual();
+    }
+
+    private void SaveStartingState()
+    {
+        if (playerA != null)
+            startingPlayerAPosition = playerA.position;
+
+        if (playerB != null)
+            startingPlayerBPosition = playerB.position;
+
+        if (rope != null)
+        {
+            startingRopePosition = rope.position;
+            startingRopeRotation = rope.rotation;
+            startingRopeScale = rope.localScale;
+        }
+
+        startingStateSaved = true;
+    }
+
+    private void InitializeControllerPositions()
+    {
+        if (controllerA != null)
+            previousControllerAPosition = controllerA.position;
+
+        if (controllerB != null)
+            previousControllerBPosition = controllerB.position;
+
+        controllersInitialized =
+            controllerA != null && controllerB != null;
+    }
+
+    private void Update()
+    {
+        if (!gameStarted || gameOver)
+            return;
+
+        UpdatePullAxis();
+
+        ReadPullInputs(out float inputA, out float inputB);
+
+        float netForce = inputA - inputB;
+
+        ropeVelocity +=
+            netForce * pullAcceleration * Time.deltaTime;
+
+        ropeVelocity *=
+            Mathf.Exp(-ropeResistance * Time.deltaTime);
+
+        ropeVelocity = Mathf.Clamp(
+            ropeVelocity,
+            -maxRopeSpeed,
+            maxRopeSpeed
+        );
+
+        // Positive velocity pulls Player B toward the pond.
+        if (ropeVelocity > 0.001f && playerB != null)
+        {
+            playerB.position -=
+                pullAxis * ropeVelocity * Time.deltaTime;
+        }
+        else if (ropeVelocity < -0.001f && playerA != null)
+        {
+            playerA.position +=
+                pullAxis * (-ropeVelocity) * Time.deltaTime;
+        }
+
+        KeepPlayersWithinRange();
+        UpdateRopeVisual();
+
+        // Check pond detection first.
+        if (pondLossZone != null)
+        {
+            if (playerA != null && IsInsidePond(playerA.position))
+            {
+                Debug.Log("Player A entered the pond zone.");
+                PlayerAFallsIntoPond();
+                return;
+            }
+
+            if (playerB != null && IsInsidePond(playerB.position))
+            {
+                Debug.Log("Player B entered the pond zone.");
+                PlayerBFallsIntoPond();
+                return;
+            }
+        }
+
+        // Player A losing-line check.
+        if (playerA != null && losingLineA != null &&
+            playerA.position.z <= losingLineA.position.z)
+        {
+            Debug.Log("Player A crossed Losing Line A.");
+            PlayerAFallsIntoPond();
+            return;
+        }
+
+        // Player B losing-line check.
+        // No per-frame position logging.
+        if (playerB != null && losingLineB != null &&
+            playerB.position.z >= losingLineB.position.z)
+        {
+            Debug.Log("Player B crossed Losing Line B.");
+            PlayerBFallsIntoPond();
+            return;
+        }
+    }
+
+    private void KeepPlayersWithinRange()
+    {
+        if (playerA == null || playerB == null)
+            return;
+
+        float aOffset = Vector3.Dot(
+            playerA.position - startingPlayerAPosition,
+            pullAxis
+        );
+
+        float bOffset = Vector3.Dot(
+            playerB.position - startingPlayerBPosition,
+            pullAxis
+        );
+
+        float clampedA = Mathf.Clamp(
+            aOffset, -maxRopeOffset, maxRopeOffset
+        );
+
+        float clampedB = Mathf.Clamp(
+            bOffset, -maxRopeOffset, maxRopeOffset
+        );
+
+        playerA.position -= pullAxis * (aOffset - clampedA);
+        playerB.position -= pullAxis * (bOffset - clampedB);
+    }
+
+    private void UpdatePullAxis()
+    {
+        if (playerA == null || playerB == null)
+            return;
+
+        Vector3 difference =
+            playerB.position - playerA.position;
+
+        difference.y = 0f;
+
+        if (difference.sqrMagnitude > 0.0001f)
+            pullAxis = difference.normalized;
+    }
+
+    private void ReadPullInputs(
+        out float inputA,
+        out float inputB)
+    {
+        inputA = 0f;
+        inputB = 0f;
+
+        if (keyboardTesting)
+        {
+            if (Input.GetKey(KeyCode.A))
+                inputA = playerAStrength;
+
+            if (Input.GetKey(KeyCode.D))
+                inputB = playerBStrength;
+
+            UpdatePreviousControllerPositions();
+            return;
+        }
+
+        if (!controllersInitialized ||
+            controllerA == null || controllerB == null)
+        {
+            UpdatePreviousControllerPositions();
+            return;
+        }
+
+        float dt = Mathf.Max(Time.deltaTime, 0.0001f);
+
+        Vector3 movementA =
+            (controllerA.position -
+             previousControllerAPosition) / dt;
+
+        Vector3 movementB =
+            (controllerB.position -
+             previousControllerBPosition) / dt;
+
+        bool grippingA = IsGripHeld(XRNode.LeftHand);
+        bool grippingB = IsGripHeld(XRNode.RightHand);
+
+        // Log only when a grip is detected, not every frame.
+        if (grippingA || grippingB)
+        {
+            Debug.Log(
+                $"Grip detected - Left: {grippingA}, " +
+                $"Right: {grippingB}"
+            );
+        }
+
+        float speedA = movementA.magnitude;
+        float speedB = movementB.magnitude;
+
+        if (grippingA && speedA > deadZone)
+        {
+            inputA =
+                speedA * pullSensitivity * playerAStrength;
+        }
+
+        if (grippingB && speedB > deadZone)
+        {
+            inputB =
+                speedB * pullSensitivity * playerBStrength;
+        }
+
+        UpdatePreviousControllerPositions();
+    }
+
+    private bool IsGripHeld(XRNode node)
+    {
+        InputDevice device =
+            InputDevices.GetDeviceAtXRNode(node);
+
+        if (!device.isValid)
+            return false;
+
+        if (device.TryGetFeatureValue(
+            CommonUsages.gripButton,
+            out bool gripButton))
+        {
+            return gripButton;
+        }
+
+        return device.TryGetFeatureValue(
+            CommonUsages.grip,
+            out float gripValue)
+            && gripValue > 0.5f;
+    }
+
+    private void UpdatePreviousControllerPositions()
+    {
+        if (controllerA != null)
+            previousControllerAPosition = controllerA.position;
+
+        if (controllerB != null)
+            previousControllerBPosition = controllerB.position;
+    }
+
+    private void UpdateRopeVisual()
+    {
+        if (rope == null ||
+            playerA == null ||
+            playerB == null)
+            return;
+
+        Vector3 midpoint =
+            (playerA.position + playerB.position) * 0.5f;
+
+        midpoint.y += ropeHeightOffset;
+        rope.position = midpoint;
+
+        Vector3 direction =
+            playerB.position - playerA.position;
+
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude > 0.0001f)
+        {
+            rope.rotation = Quaternion.FromToRotation(
+                Vector3.up,
+                direction.normalized
+            );
+        }
+
+        if (startingStateSaved)
+            rope.localScale = startingRopeScale;
+    }
+
+    private bool IsInsidePond(Vector3 worldPosition)
+    {
+        if (pondLossZone == null)
+            return false;
+
+        Vector3 localPosition =
+            pondLossZone.transform.InverseTransformPoint(
+                worldPosition
+            );
+
+        Vector3 center = pondLossZone.center;
+        Vector3 halfSize = pondLossZone.size * 0.5f;
+
+        return localPosition.x >= center.x - halfSize.x &&
+               localPosition.x <= center.x + halfSize.x &&
+               localPosition.z >= center.z - halfSize.z &&
+               localPosition.z <= center.z + halfSize.z &&
+               localPosition.y >= center.y - halfSize.y &&
+               localPosition.y <=
+                   center.y + halfSize.y + 1.5f;
+    }
+
+    private void PlayerAFallsIntoPond()
+    {
+        if (gameOver)
+            return;
+
+        gameOver = true;
+
+        Debug.Log("PLAYER A FALL DETECTED!");
+
+        CreatePondSplashAt(GetSplashPosition(playerA));
+
+        ShowResult(
+            playerBName + " WINS!\n" +
+            playerAName + " fell into the pond!"
+        );
+    }
+
+    private void PlayerBFallsIntoPond()
+    {
+        if (gameOver)
+            return;
+
+        gameOver = true;
+
+        Debug.Log("PLAYER B FALL DETECTED!");
+
+        CreatePondSplashAt(GetSplashPosition(playerB));
+
+        ShowResult(
+            playerAName + " WINS!\n" +
+            playerBName + " fell into the pond!"
+        );
+    }
+
+    private Vector3 GetSplashPosition(Transform player)
+    {
+        if (player == null)
+            return Vector3.zero;
+
+        Vector3 position = player.position;
+
+        if (pondLossZone != null)
+            position.y = pondLossZone.bounds.max.y;
+
+        return position;
+    }
+
+    private void ShowResult(string message)
+    {
+        if (losingMessage != null)
+        {
+            losingMessage.text = message;
+            losingMessage.gameObject.SetActive(true);
+        }
+
+        if (playAgainButtonObject != null)
+            playAgainButtonObject.SetActive(true);
+
+        Debug.Log(message);
+    }
+
+    private void CreatePondSplashAt(Vector3 position)
+    {
+        GameObject splash = new GameObject("PondSplash");
+        splash.transform.position = position;
+
+        ParticleSystem particles =
+            splash.AddComponent<ParticleSystem>();
+
+        particles.Stop(
+            true,
+            ParticleSystemStopBehavior.StopEmittingAndClear
+        );
+
+        ParticleSystem.MainModule main = particles.main;
+        main.playOnAwake = false;
+        main.duration = 1.2f;
+        main.loop = false;
+        main.startLifetime = 0.7f;
+        main.startSpeed = 2.5f;
+        main.startSize = 0.12f;
+        main.maxParticles = 80;
+
+        ParticleSystem.EmissionModule emission =
+            particles.emission;
+
+        emission.enabled = true;
+        emission.rateOverTime = 0;
+
+        emission.SetBursts(
+            new[] { new ParticleSystem.Burst(0f, 45) }
+        );
+
+        ParticleSystem.ShapeModule shape = particles.shape;
+        shape.enabled = true;
+        shape.shapeType = ParticleSystemShapeType.Hemisphere;
+        shape.radius = 0.35f;
+
+        ParticleSystem.ColorOverLifetimeModule color =
+            particles.colorOverLifetime;
+
+        color.enabled = true;
+
+        Gradient gradient = new Gradient();
+
+        gradient.SetKeys(
+            new[]
+            {
+                new GradientColorKey(
+                    new Color(0.65f, 0.9f, 1f), 0f
+                ),
+                new GradientColorKey(Color.white, 1f)
+            },
+            new[]
+            {
+                new GradientAlphaKey(1f, 0f),
+                new GradientAlphaKey(0f, 1f)
+            }
+        );
+
+        color.color = gradient;
+
+        if (splashSound != null)
+        {
+            AudioSource audioSource =
+                splash.AddComponent<AudioSource>();
+
+            audioSource.clip = splashSound;
+            audioSource.spatialBlend = 0f;
+            audioSource.playOnAwake = false;
+            audioSource.volume = 1f;
+            audioSource.Play();
+        }
+
+        particles.Play();
+
+        float lifetime = splashSound != null
+            ? Mathf.Max(splashLifetime, splashSound.length)
+            : splashLifetime;
+
+        Destroy(splash, lifetime);
+    }
+
+    public void StartGame()
+    {
+        if (player1NameInput != null &&
+            !string.IsNullOrWhiteSpace(
+                player1NameInput.text))
+        {
+            playerAName = player1NameInput.text.Trim();
+        }
+
+        if (player2NameInput != null &&
+            !string.IsNullOrWhiteSpace(
+                player2NameInput.text))
+        {
+            playerBName = player2NameInput.text.Trim();
+        }
+
+        if (playerAName == "Player 1 Name")
+            playerAName = "Player A";
+
+        if (playerBName == "Player 2 Name")
+            playerBName = "Player B";
+
+        ResetGameState();
+
+        if (player1NameObject != null)
+            player1NameObject.SetActive(false);
+
+        if (player2NameObject != null)
+            player2NameObject.SetActive(false);
+
+        if (startGameButtonObject != null)
+            startGameButtonObject.SetActive(false);
+
+        if (losingMessage != null)
+        {
+            losingMessage.text = "";
+            losingMessage.gameObject.SetActive(false);
+        }
+
+        if (playAgainButtonObject != null)
+            playAgainButtonObject.SetActive(false);
+
+        gameStarted = true;
+        gameOver = false;
+
+        Debug.Log(
+            "Game started: " +
+            playerAName + " vs " + playerBName
+        );
+    }
+
+    private void ResetGameState()
+    {
+        if (!startingStateSaved)
+            SaveStartingState();
+
+        if (playerA != null)
+            playerA.position = startingPlayerAPosition;
+
+        if (playerB != null)
+            playerB.position = startingPlayerBPosition;
+
+        if (rope != null)
+        {
+            rope.position = startingRopePosition;
+            rope.rotation = startingRopeRotation;
+            rope.localScale = startingRopeScale;
+        }
+
+        ropeVelocity = 0f;
+
+        UpdatePullAxis();
+        InitializeControllerPositions();
+        UpdateRopeVisual();
+    }
+
+    public void PlayAgain()
+    {
+        gameOver = false;
+        gameStarted = false;
+
+        ResetGameState();
+
+        if (losingMessage != null)
+        {
+            losingMessage.text = "";
+            losingMessage.gameObject.SetActive(false);
+        }
+
+        if (playAgainButtonObject != null)
+            playAgainButtonObject.SetActive(false);
+
+        if (player1NameObject != null)
+            player1NameObject.SetActive(true);
+
+        if (player2NameObject != null)
+            player2NameObject.SetActive(true);
+
+        if (startGameButtonObject != null)
+            startGameButtonObject.SetActive(true);
+
+        Debug.Log("Game reset. Ready to play again.");
+    }
+}
